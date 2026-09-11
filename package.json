@@ -1,0 +1,39 @@
+{
+  "name": "supportsense-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "SupportSense Fastify Backend with Session Authentication and RBAC",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "test:auth": "tsx test/auth.test.ts",
+    "test:tickets": "tsx test/tickets.test.ts",
+    "test:e2e": "tsx test/e2e-frontend-backend.ts",
+    "test:e2e-tickets": "tsx test/e2e-tickets.ts"
+  },
+  "keywords": ["fastify", "typescript", "postgresql", "authentication", "rbac"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.0.1",
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "pg": "^8.13.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.13.9",
+    "@types/pg": "^8.11.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
+
