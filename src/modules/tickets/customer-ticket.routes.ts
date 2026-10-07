@@ -11,6 +11,7 @@ export const customerTicketRoutes: FastifyPluginAsync = async (app: FastifyInsta
   app.post("/", CustomerTicketController.create);
   app.get("/", CustomerTicketController.list);
   app.get("/:id", CustomerTicketController.getById);
+  app.patch("/:id", CustomerTicketController.update);
   app.post("/:id/messages", CustomerTicketController.addMessage);
 };
 

@@ -1,18 +1,39 @@
 import { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { TicketRepository } from "./ticket.repository.js";
-import { ForbiddenError, NotFoundError } from "../../utils/errors.js";
-import { TicketCategory, TicketPriority } from "./ticket.types.js";
+import { BadRequestError, ForbiddenError, NotFoundError } from "../../utils/errors.js";
+import { TicketCategory, TicketPriority, TicketStatus } from "./ticket.types.js";
 import { query } from "../../db/client.js";
 
 const createTicketSchema = z.object({
   subject: z.string().trim().min(3, "Subject must be at least 3 characters"),
   body: z.string().trim().min(5, "Message body must be at least 5 characters"),
   categoryHint: z.string().optional().nullable(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional().nullable(),
 });
 
 const addMessageSchema = z.object({
   body: z.string().trim().min(1, "Message body cannot be empty"),
+});
+
+const updateTicketSchema = z.object({
+  subject: z.string().trim().min(3).optional(),
+  status: z
+    .enum([
+      "NEW",
+      "AI_PROCESSING",
+      "AWAITING_STAFF_REVIEW",
+      "ESCALATED",
+      "AWAITING_CUSTOMER",
+      "RESOLVED",
+      "CLOSED",
+    ])
+    .optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional().nullable(),
+  category: z
+    .enum(["BILLING", "TECHNICAL", "ACCOUNT", "ORDERS", "RETURNS", "SECURITY", "OTHER"])
+    .optional()
+    .nullable(),
 });
 
 export class CustomerTicketController {
@@ -22,6 +43,11 @@ export class CustomerTicketController {
    */
   static async create(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
     const input = createTicketSchema.parse(req.body);
 
     let assignedTeamId: string | null = null;
@@ -39,7 +65,7 @@ export class CustomerTicketController {
          WHERE tenant_id = $1 AND (name ILIKE $2 OR description ILIKE $2)
          ORDER BY (name ILIKE $2) DESC
          LIMIT 1`,
-        [user.tenantId || "t-acme", search]
+        [tenantId, search]
       );
       if (teamRes.rows[0]) {
         assignedTeamId = teamRes.rows[0].id;
@@ -47,13 +73,13 @@ export class CustomerTicketController {
     }
 
     const ticket = await TicketRepository.createTicket({
-      tenantId: user.tenantId || "t-acme",
+      tenantId,
       customerId: user.id,
       customerName: user.fullName,
       subject: input.subject,
       body: input.body,
       category: (input.categoryHint as TicketCategory) || null,
-      priority: null,
+      priority: (input.priority as TicketPriority) || null,
       assignedTeamId,
     });
 
@@ -62,14 +88,35 @@ export class CustomerTicketController {
 
   /**
    * GET /api/tickets
-   * Customer retrieves their own tickets.
+   * Customer retrieves their own tickets with optional filtering.
    */
-  static async list(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  static async list(
+    req: FastifyRequest<{
+      Querystring: {
+        status?: string;
+        priority?: string;
+        q?: string;
+        page?: string;
+        pageSize?: string;
+      };
+    }>,
+    reply: FastifyReply
+  ): Promise<void> {
     const user = req.user!;
-    const tickets = await TicketRepository.findCustomerTickets(
-      user.tenantId || "t-acme",
-      user.id
-    );
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
+    const { status, priority, q, page, pageSize } = req.query;
+
+    const tickets = await TicketRepository.findCustomerTickets(tenantId, user.id, {
+      status,
+      priority,
+      q,
+      page: page ? parseInt(page, 10) : undefined,
+      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+    });
 
     reply.status(200).send(tickets);
   }
@@ -83,9 +130,14 @@ export class CustomerTicketController {
     reply: FastifyReply
   ): Promise<void> {
     const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
     const { id } = req.params;
 
-    const ticket = await TicketRepository.findTicketById(id, user.tenantId || "t-acme");
+    const ticket = await TicketRepository.findTicketById(id, tenantId);
     if (!ticket) {
       throw new NotFoundError("That ticket could not be found.");
     }
@@ -104,6 +156,45 @@ export class CustomerTicketController {
   }
 
   /**
+   * PATCH /api/tickets/:id
+   * Customer updates their own ticket (e.g. resolve or close)
+   */
+  static async update(
+    req: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
+    const { id } = req.params;
+
+    const ticket = await TicketRepository.findTicketById(id, tenantId);
+    if (!ticket) {
+      throw new NotFoundError("That ticket could not be found.");
+    }
+
+    if (ticket.customerId !== user.id) {
+      throw new ForbiddenError("This ticket belongs to another customer.");
+    }
+
+    const input = updateTicketSchema.parse(req.body);
+
+    const updated = await TicketRepository.updateTicket({
+      ticketId: id,
+      tenantId,
+      subject: input.subject,
+      status: input.status,
+      priority: input.priority,
+      category: input.category,
+    });
+
+    reply.status(200).send(updated);
+  }
+
+  /**
    * POST /api/tickets/:id/messages
    * Customer appends a reply to their ticket thread.
    */
@@ -112,10 +203,15 @@ export class CustomerTicketController {
     reply: FastifyReply
   ): Promise<void> {
     const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
     const { id } = req.params;
     const input = addMessageSchema.parse(req.body);
 
-    const ticket = await TicketRepository.findTicketById(id, user.tenantId || "t-acme");
+    const ticket = await TicketRepository.findTicketById(id, tenantId);
     if (!ticket) {
       throw new NotFoundError("That ticket could not be found.");
     }
@@ -137,4 +233,3 @@ export class CustomerTicketController {
     reply.status(201).send(message);
   }
 }
-

@@ -1,8 +1,9 @@
 import { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { TicketRepository } from "./ticket.repository.js";
-import { ForbiddenError, NotFoundError } from "../../utils/errors.js";
+import { BadRequestError, ForbiddenError, NotFoundError } from "../../utils/errors.js";
 import { query } from "../../db/client.js";
+import { TicketCategory, TicketPriority, TicketStatus } from "./ticket.types.js";
 
 const replySchema = z.object({
   body: z.string().trim().min(1, "Reply message cannot be empty"),
@@ -14,6 +15,28 @@ const resolveSchema = z.object({
 
 const assignSchema = z.object({
   teamId: z.string().optional().nullable(),
+  assigneeId: z.string().optional().nullable(),
+});
+
+const updateDeskTicketSchema = z.object({
+  subject: z.string().trim().min(3).optional(),
+  status: z
+    .enum([
+      "NEW",
+      "AI_PROCESSING",
+      "AWAITING_STAFF_REVIEW",
+      "ESCALATED",
+      "AWAITING_CUSTOMER",
+      "RESOLVED",
+      "CLOSED",
+    ])
+    .optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional().nullable(),
+  category: z
+    .enum(["BILLING", "TECHNICAL", "ACCOUNT", "ORDERS", "RETURNS", "SECURITY", "OTHER"])
+    .optional()
+    .nullable(),
+  assignedTeamId: z.string().optional().nullable(),
   assigneeId: z.string().optional().nullable(),
 });
 
@@ -39,11 +62,16 @@ export class DeskTicketController {
     reply: FastifyReply
   ): Promise<void> {
     const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
     const { q, aiState, priority, category, assignment, teamId, sort, page, pageSize } =
       req.query;
 
     const result = await TicketRepository.findDeskTickets(
-      user.tenantId || "t-acme",
+      tenantId,
       {
         q,
         aiState,
@@ -72,9 +100,14 @@ export class DeskTicketController {
     reply: FastifyReply
   ): Promise<void> {
     const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
     const { id } = req.params;
 
-    const ticket = await TicketRepository.findTicketById(id, user.tenantId || "t-acme");
+    const ticket = await TicketRepository.findTicketById(id, tenantId);
     if (!ticket) {
       throw new NotFoundError("That ticket could not be found.");
     }
@@ -110,6 +143,51 @@ export class DeskTicketController {
   }
 
   /**
+   * PATCH /api/desk/tickets/:id
+   * Staff/Admin updates ticket status, priority, category, or assignment.
+   */
+  static async update(
+    req: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
+    const { id } = req.params;
+    const ticket = await TicketRepository.findTicketById(id, tenantId);
+    if (!ticket) {
+      throw new NotFoundError("That ticket could not be found.");
+    }
+
+    if (
+      user.role.toLowerCase() === "staff" &&
+      user.teamId &&
+      ticket.assignedTeamId &&
+      ticket.assignedTeamId !== user.teamId
+    ) {
+      throw new ForbiddenError("Ticket is not assigned to your team.");
+    }
+
+    const input = updateDeskTicketSchema.parse(req.body || {});
+
+    const updated = await TicketRepository.updateTicket({
+      ticketId: id,
+      tenantId,
+      subject: input.subject,
+      status: input.status as TicketStatus | undefined,
+      priority: input.priority as TicketPriority | null | undefined,
+      category: input.category as TicketCategory | null | undefined,
+      assignedTeamId: input.assignedTeamId,
+      assigneeId: input.assigneeId,
+    });
+
+    reply.status(200).send(updated);
+  }
+
+  /**
    * POST /api/desk/tickets/:id/reply
    * Staff/Admin posts a manual reply to the customer.
    */
@@ -118,10 +196,15 @@ export class DeskTicketController {
     reply: FastifyReply
   ): Promise<void> {
     const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
     const { id } = req.params;
     const input = replySchema.parse(req.body);
 
-    const ticket = await TicketRepository.findTicketById(id, user.tenantId || "t-acme");
+    const ticket = await TicketRepository.findTicketById(id, tenantId);
     if (!ticket) {
       throw new NotFoundError("That ticket could not be found.");
     }
@@ -161,10 +244,15 @@ export class DeskTicketController {
     reply: FastifyReply
   ): Promise<void> {
     const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
     const { id } = req.params;
     const input = resolveSchema.parse(req.body || {});
 
-    const ticket = await TicketRepository.findTicketById(id, user.tenantId || "t-acme");
+    const ticket = await TicketRepository.findTicketById(id, tenantId);
     if (!ticket) {
       throw new NotFoundError("That ticket could not be found.");
     }
@@ -180,7 +268,7 @@ export class DeskTicketController {
 
     const updated = await TicketRepository.resolveTicket({
       ticketId: id,
-      tenantId: user.tenantId || "t-acme",
+      tenantId,
       staffName: user.fullName,
       addToKb: Boolean(input.addToKb),
     });
@@ -197,10 +285,15 @@ export class DeskTicketController {
     reply: FastifyReply
   ): Promise<void> {
     const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
     const { id } = req.params;
     const input = assignSchema.parse(req.body || {});
 
-    const ticket = await TicketRepository.findTicketById(id, user.tenantId || "t-acme");
+    const ticket = await TicketRepository.findTicketById(id, tenantId);
     if (!ticket) {
       throw new NotFoundError("That ticket could not be found.");
     }
@@ -218,7 +311,7 @@ export class DeskTicketController {
 
     const updated = await TicketRepository.assignTicket({
       ticketId: id,
-      tenantId: user.tenantId || "t-acme",
+      tenantId,
       teamId: input.teamId,
       teamName,
       assigneeId: input.assigneeId,
@@ -228,4 +321,3 @@ export class DeskTicketController {
     reply.status(200).send(updated);
   }
 }
-

@@ -234,19 +234,125 @@ export class TicketRepository {
   }
 
   /**
-   * Find all tickets belonging to a specific customer within a tenant.
+   * Find all tickets belonging to a specific customer within a tenant with optional filtering.
    */
-  static async findCustomerTickets(tenantId: string, customerId: string): Promise<Ticket[]> {
+  static async findCustomerTickets(
+    tenantId: string,
+    customerId: string,
+    filters?: {
+      status?: string;
+      priority?: string;
+      q?: string;
+      page?: number;
+      pageSize?: number;
+    }
+  ): Promise<Ticket[]> {
+    const conditions: string[] = ["t.tenant_id = $1", "t.customer_id = $2"];
+    const params: any[] = [tenantId, customerId];
+
+    if (filters?.status && filters.status !== "ALL") {
+      params.push(filters.status);
+      conditions.push(`t.status = $${params.length}`);
+    }
+
+    if (filters?.priority && filters.priority !== "ALL") {
+      params.push(filters.priority);
+      conditions.push(`t.priority = $${params.length}`);
+    }
+
+    if (filters?.q && filters.q.trim()) {
+      params.push(`%${filters.q.trim().toLowerCase()}%`);
+      const qIndex = params.length;
+      conditions.push(`(
+        lower(t.subject) LIKE $${qIndex} OR
+        t.reference::text LIKE $${qIndex} OR
+        lower(COALESCE(last_msg.body, '')) LIKE $${qIndex}
+      )`);
+    }
+
+    let limitClause = "";
+    if (filters?.pageSize) {
+      const page = Math.max(Number(filters.page) || 1, 1);
+      const pageSize = Math.max(Number(filters.pageSize) || 12, 1);
+      const offset = (page - 1) * pageSize;
+      params.push(pageSize, offset);
+      limitClause = `LIMIT $${params.length - 1} OFFSET $${params.length}`;
+    }
+
     const res = await query<TicketQueryRow>(
       `SELECT ${TICKET_SELECT_FIELDS}
        FROM tickets t
        ${TICKET_JOINS}
-       WHERE t.tenant_id = $1 AND t.customer_id = $2
-       ORDER BY t.updated_at DESC`,
-      [tenantId, customerId]
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY t.updated_at DESC
+       ${limitClause}`,
+      params
     );
 
     return res.rows.map(mapTicketRow);
+  }
+
+  /**
+   * Update ticket fields with strict tenant isolation.
+   */
+  static async updateTicket(data: {
+    ticketId: string;
+    tenantId: string;
+    subject?: string;
+    status?: TicketStatus;
+    priority?: TicketPriority | null;
+    category?: TicketCategory | null;
+    assignedTeamId?: string | null;
+    assigneeId?: string | null;
+    unreadForCustomer?: boolean;
+    inKb?: boolean;
+  }): Promise<Ticket | null> {
+    const updates: string[] = ["updated_at = NOW()"];
+    const params: any[] = [data.ticketId, data.tenantId];
+
+    if (data.subject !== undefined) {
+      params.push(data.subject.trim());
+      updates.push(`subject = $${params.length}`);
+    }
+    if (data.status !== undefined) {
+      params.push(data.status);
+      updates.push(`status = $${params.length}`);
+    }
+    if (data.priority !== undefined) {
+      params.push(data.priority);
+      updates.push(`priority = $${params.length}`);
+    }
+    if (data.category !== undefined) {
+      params.push(data.category);
+      updates.push(`category = $${params.length}`);
+    }
+    if (data.assignedTeamId !== undefined) {
+      params.push(data.assignedTeamId);
+      updates.push(`assigned_team_id = $${params.length}`);
+    }
+    if (data.assigneeId !== undefined) {
+      params.push(data.assigneeId);
+      updates.push(`assignee_id = $${params.length}`);
+    }
+    if (data.unreadForCustomer !== undefined) {
+      params.push(data.unreadForCustomer);
+      updates.push(`unread_for_customer = $${params.length}`);
+    }
+    if (data.inKb !== undefined) {
+      params.push(data.inKb);
+      updates.push(`in_kb = $${params.length}`);
+    }
+
+    const res = await query(
+      `UPDATE tickets
+       SET ${updates.join(", ")}
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING id`,
+      params
+    );
+
+    if (!res.rows[0]) return null;
+    return this.findTicketById(data.ticketId, data.tenantId);
   }
 
   /**

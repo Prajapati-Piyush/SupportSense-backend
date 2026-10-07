@@ -10,6 +10,7 @@ export const deskTicketRoutes: FastifyPluginAsync = async (app: FastifyInstance)
 
   app.get("/", DeskTicketController.list);
   app.get("/:id", DeskTicketController.getById);
+  app.patch("/:id", DeskTicketController.update);
   app.post("/:id/reply", DeskTicketController.reply);
   app.post("/:id/resolve", DeskTicketController.resolve);
   app.post("/:id/assign", DeskTicketController.assign);

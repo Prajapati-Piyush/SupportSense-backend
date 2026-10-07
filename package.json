@@ -13,15 +13,23 @@
     "db:seed": "tsx src/db/seed.ts",
     "test:auth": "tsx test/auth.test.ts",
     "test:tickets": "tsx test/tickets.test.ts",
+    "test:documents": "tsx test/documents-and-tickets.test.ts",
     "test:e2e": "tsx test/e2e-frontend-backend.ts",
     "test:e2e-tickets": "tsx test/e2e-tickets.ts"
   },
-  "keywords": ["fastify", "typescript", "postgresql", "authentication", "rbac"],
+  "keywords": [
+    "fastify",
+    "typescript",
+    "postgresql",
+    "authentication",
+    "rbac"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.0.1",
+    "@fastify/multipart": "^10.1.2",
     "bcryptjs": "^3.0.2",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
@@ -36,4 +44,3 @@
     "typescript": "^5.8.2"
   }
 }
-

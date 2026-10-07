@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyCors from "@fastify/cors";
+import fastifyMultipart from "@fastify/multipart";
 import { ZodError } from "zod";
 import { env } from "./config/env.js";
 import { HttpError } from "./utils/errors.js";
@@ -8,6 +9,8 @@ import { authRoutes } from "./modules/auth/auth.routes.js";
 import { protectedRoutes } from "./modules/protected/protected.routes.js";
 import { customerTicketRoutes } from "./modules/tickets/customer-ticket.routes.js";
 import { deskTicketRoutes } from "./modules/tickets/desk-ticket.routes.js";
+import { documentRoutes } from "./modules/documents/document.routes.js";
+import { teamsRoutes } from "./modules/teams/teams.routes.js";
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({
@@ -47,6 +50,14 @@ export function buildApp(): FastifyInstance {
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  });
+
+  // Multipart plugin for file uploads
+  app.register(fastifyMultipart, {
+    limits: {
+      fileSize: 15 * 1024 * 1024, // 15MB
+      files: 1,
+    },
   });
 
   // Global Error Handler
@@ -117,6 +128,9 @@ export function buildApp(): FastifyInstance {
   app.register(protectedRoutes, { prefix: "/api/protected" });
   app.register(customerTicketRoutes, { prefix: "/api/tickets" });
   app.register(deskTicketRoutes, { prefix: "/api/desk/tickets" });
+  app.register(documentRoutes, { prefix: "/api/documents" });
+  app.register(documentRoutes, { prefix: "/api/admin/documents" });
+  app.register(teamsRoutes, { prefix: "/api/teams" });
 
   return app;
 }
