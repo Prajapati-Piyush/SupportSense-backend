@@ -10,6 +10,8 @@ import { protectedRoutes } from "./modules/protected/protected.routes.js";
 import { customerTicketRoutes } from "./modules/tickets/customer-ticket.routes.js";
 import { deskTicketRoutes } from "./modules/tickets/desk-ticket.routes.js";
 import { documentRoutes } from "./modules/documents/document.routes.js";
+import { retrievalRoutes } from "./modules/rag/retrieval/retrieval.routes.js";
+import { generationRoutes } from "./modules/rag/generation/generation.routes.js";
 import { teamsRoutes } from "./modules/teams/teams.routes.js";
 
 export function buildApp(): FastifyInstance {
@@ -130,6 +132,8 @@ export function buildApp(): FastifyInstance {
   app.register(deskTicketRoutes, { prefix: "/api/desk/tickets" });
   app.register(documentRoutes, { prefix: "/api/documents" });
   app.register(documentRoutes, { prefix: "/api/admin/documents" });
+  app.register(retrievalRoutes, { prefix: "/api/retrieval" });
+  app.register(generationRoutes, { prefix: "/api/rag" });
   app.register(teamsRoutes, { prefix: "/api/teams" });
 
   return app;

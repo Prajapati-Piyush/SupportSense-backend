@@ -18,6 +18,20 @@ function mapDocumentRow(row: DocumentRow): DocumentPublic {
   const wordCount = computeWordCount(content);
   const tokenCount = Math.round(wordCount * 1.32);
 
+  const rawChunkCount = (row as any).real_chunk_count;
+  const parsedChunkCount =
+    typeof rawChunkCount === "number"
+      ? rawChunkCount
+      : rawChunkCount
+      ? parseInt(rawChunkCount, 10)
+      : null;
+  const chunkCount =
+    parsedChunkCount !== null && parsedChunkCount > 0
+      ? parsedChunkCount
+      : headings.length > 0
+      ? headings.length
+      : 1;
+
   let ingestProgress = 1;
   if (row.status === "uploaded") ingestProgress = 0.2;
   else if (row.status === "processing") ingestProgress = 0.6;
@@ -42,7 +56,7 @@ function mapDocumentRow(row: DocumentRow): DocumentPublic {
     updatedAt: row.updated_at.toISOString(),
 
     // UI compatibility fields
-    chunkCount: headings.length > 0 ? headings.length : 1,
+    chunkCount,
     tokenCount,
     wordCount,
     headings,
@@ -87,7 +101,8 @@ export class DocumentRepository {
 
   static async findByTenant(tenantId: string): Promise<DocumentPublic[]> {
     const res = await query<DocumentRow>(
-      `SELECT d.*, u.name as uploaded_by_name
+      `SELECT d.*, u.name as uploaded_by_name,
+              (SELECT COUNT(*) FROM document_chunks dc WHERE dc.document_id = d.id AND dc.tenant_id = d.tenant_id)::int as real_chunk_count
        FROM documents d
        LEFT JOIN users u ON d.uploaded_by = u.id
        WHERE d.tenant_id = $1
@@ -100,7 +115,8 @@ export class DocumentRepository {
 
   static async findById(id: string, tenantId: string): Promise<DocumentPublic | null> {
     const res = await query<DocumentRow>(
-      `SELECT d.*, u.name as uploaded_by_name
+      `SELECT d.*, u.name as uploaded_by_name,
+              (SELECT COUNT(*) FROM document_chunks dc WHERE dc.document_id = d.id AND dc.tenant_id = d.tenant_id)::int as real_chunk_count
        FROM documents d
        LEFT JOIN users u ON d.uploaded_by = u.id
        WHERE d.id = $1 AND d.tenant_id = $2
@@ -123,6 +139,35 @@ export class DocumentRepository {
        WHERE id = $3 AND tenant_id = $4
        RETURNING *`,
       [status, errorMessage || null, id, tenantId]
+    );
+
+    return res.rows[0] ? mapDocumentRow(res.rows[0]) : null;
+  }
+
+  static async updateProcessingResult(
+    id: string,
+    tenantId: string,
+    data: {
+      content?: string | null;
+      status: DocumentLifecycleStatus;
+      errorMessage?: string | null;
+    }
+  ): Promise<DocumentPublic | null> {
+    const res = await query<DocumentRow>(
+      `UPDATE documents
+       SET content = COALESCE($1, content),
+           status = $2,
+           error_message = $3,
+           updated_at = NOW()
+       WHERE id = $4 AND tenant_id = $5
+       RETURNING *`,
+      [
+        data.content !== undefined ? data.content : null,
+        data.status,
+        data.errorMessage || null,
+        id,
+        tenantId,
+      ]
     );
 
     return res.rows[0] ? mapDocumentRow(res.rows[0]) : null;

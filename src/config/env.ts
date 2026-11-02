@@ -23,6 +23,23 @@ const envSchema = z.object({
 
   // CORS
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
+
+  // RAG / Embeddings / Retrieval
+  EMBEDDING_PROVIDER: z.enum(["gemini", "openai", "mock"]).default("gemini"),
+  GEMINI_API_KEY: z.string().optional(),
+  GOOGLE_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  EMBEDDING_MODEL: z.string().default("text-embedding-004"),
+  RETRIEVAL_TOP_K: z.coerce.number().default(5),
+  RETRIEVAL_SIMILARITY_THRESHOLD: z.coerce.number().default(0.3),
+  RETRIEVAL_RRF_K: z.coerce.number().default(60),
+
+  // RAG / LLM Answer Generation
+  LLM_PROVIDER: z.enum(["gemini", "openai", "mock"]).default("gemini"),
+  LLM_MODEL: z.string().default("gemini-1.5-flash"),
+  LLM_TEMPERATURE: z.coerce.number().min(0).max(1).default(0.1),
+  LLM_MAX_TOKENS: z.coerce.number().min(50).max(4096).default(1024),
+  LLM_TIMEOUT_MS: z.coerce.number().min(1000).max(120000).default(30000),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -33,4 +50,3 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
-

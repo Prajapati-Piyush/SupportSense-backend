@@ -1,9 +1,47 @@
+import fs from "fs";
+import path from "path";
 import assert from "assert";
 import { buildApp } from "../src/app.js";
 import { closePool, query } from "../src/db/client.js";
 import { runMigrations } from "../src/db/migrate.js";
 import { runSeed } from "../src/db/seed.js";
 import { getStorageService } from "../src/modules/documents/storage.factory.js";
+
+function createValidPdf(text: string): Buffer {
+  const content = `BT /F1 12 Tf 50 700 Td (${text.replace(/([()\\])/g, "\\$1")}) Tj ET`;
+  const streamLen = Buffer.byteLength(content, "utf8");
+
+  const pdf = `%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj
+4 0 obj << /Length ${streamLen} >> stream
+${content}
+endstream
+endobj
+5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+xref
+0 6
+0000000000 65535 f \r
+0000000009 00000 n \r
+0000000058 00000 n \r
+0000000115 00000 n \r
+0000000244 00000 n \r
+0000000350 00000 n \r
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+430
+%%EOF`;
+  return Buffer.from(pdf, "utf8");
+}
+
+function getSampleDocx(): Buffer {
+  const samplePath = path.resolve(process.cwd(), "node_modules/mammoth/test/test-data/comments.docx");
+  if (fs.existsSync(samplePath)) {
+    return fs.readFileSync(samplePath);
+  }
+  return Buffer.from("Fallback document content", "utf8");
+}
 
 function extractCookie(cookieHeader: string | string[] | undefined, name: string): string | null {
   if (!cookieHeader) return null;
@@ -186,7 +224,11 @@ async function runTests() {
     console.log("  2.6 Admin upload PDF file");
     const pdfMultipart = buildMultipartFormData(
       { title: "Security Whitepaper" },
-      { filename: "security-whitepaper.pdf", contentType: "application/pdf", content: Buffer.from("%PDF-1.4 simulated pdf content") }
+      {
+        filename: "security-whitepaper.pdf",
+        contentType: "application/pdf",
+        content: createValidPdf("SupportSense Security Whitepaper Document Chunks"),
+      }
     );
     const pdfRes = await app.inject({
       method: "POST",
@@ -210,7 +252,7 @@ async function runTests() {
       {
         filename: "handbook.docx",
         contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        content: Buffer.from("PK\x03\x04simulated docx binary"),
+        content: getSampleDocx(),
       }
     );
     const docxRes = await app.inject({

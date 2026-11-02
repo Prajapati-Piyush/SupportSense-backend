@@ -98,6 +98,40 @@ export class DocumentController {
   }
 
   /**
+   * GET /api/documents/:id/chunks
+   */
+  static async getChunks(
+    req: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
+    const chunks = await DocumentService.getDocumentChunks(req.params.id, tenantId);
+    reply.status(200).send(chunks);
+  }
+
+  /**
+   * POST /api/documents/:id/reprocess
+   */
+  static async reprocess(
+    req: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const user = req.user!;
+    const tenantId = user.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError("Authenticated user has no associated tenant");
+    }
+
+    const doc = await DocumentService.reprocessDocument(req.params.id, tenantId);
+    reply.status(200).send(doc);
+  }
+
+  /**
    * DELETE /api/documents/:id
    */
   static async delete(
