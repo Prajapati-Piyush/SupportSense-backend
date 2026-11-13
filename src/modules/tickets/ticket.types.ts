@@ -63,6 +63,7 @@ export interface Ticket {
   assignedTeamName: string | null;
   assigneeId: string | null;
   assigneeName: string | null;
+  assigneeTitle: string | null;
   inKb: boolean;
   unreadForCustomer: boolean;
   createdAt: string;

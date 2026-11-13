@@ -26,6 +26,7 @@ interface TicketQueryRow {
   assigned_team_name: string | null;
   assignee_id: string | null;
   assignee_name: string | null;
+  assignee_title: string | null;
   in_kb: boolean;
   unread_for_customer: boolean;
   created_at: Date;
@@ -50,6 +51,7 @@ function mapTicketRow(row: TicketQueryRow): Ticket {
     assignedTeamName: row.assigned_team_name,
     assigneeId: row.assignee_id,
     assigneeName: row.assignee_name,
+    assigneeTitle: row.assignee_title || null,
     inKb: Boolean(row.in_kb),
     unreadForCustomer: Boolean(row.unread_for_customer),
     createdAt: row.created_at.toISOString(),
@@ -87,6 +89,7 @@ const TICKET_SELECT_FIELDS = `
   tm.name AS assigned_team_name,
   t.assignee_id,
   asg.name AS assignee_name,
+  asg.title AS assignee_title,
   t.in_kb,
   t.unread_for_customer,
   t.created_at,
@@ -398,11 +401,19 @@ export class TicketRepository {
     const conditions: string[] = ["t.tenant_id = $1"];
     const params: any[] = [tenantId];
 
-    // STAFF see their assigned team tickets by default + unassigned tickets in their tenant. ADMIN owns the whole desk.
+    // STAFF see their assigned team tickets by default + tickets assigned directly to them + unassigned tickets in their tenant.
+    // ADMIN owns the whole desk across all departments.
     if (userRole.toLowerCase() === "staff") {
       if (userTeamId) {
         params.push(userTeamId);
-        conditions.push(`(t.assigned_team_id = $${params.length} OR t.assigned_team_id IS NULL)`);
+        const teamParam = params.length;
+        params.push(userId);
+        const userParam = params.length;
+        conditions.push(`(t.assigned_team_id = $${teamParam} OR t.assignee_id = $${userParam} OR t.assigned_team_id IS NULL)`);
+      } else {
+        params.push(userId);
+        const userParam = params.length;
+        conditions.push(`(t.assignee_id = $${userParam} OR t.assigned_team_id IS NULL)`);
       }
     } else if (filters.teamId && filters.teamId !== "ALL") {
       params.push(filters.teamId);
@@ -556,7 +567,7 @@ export class TicketRepository {
   }
 
   /**
-   * Assign a ticket to a team or an agent.
+   * Assign a ticket to a team and/or specific employee.
    */
   static async assignTicket(data: {
     ticketId: string;
@@ -564,6 +575,7 @@ export class TicketRepository {
     teamId?: string | null;
     teamName?: string | null;
     assigneeId?: string | null;
+    assigneeName?: string | null;
     actorName: string;
   }): Promise<Ticket> {
     const client = await (await import("../../db/client.js")).pool.connect();
@@ -576,7 +588,7 @@ export class TicketRepository {
       if (data.teamId !== undefined) {
         params.push(data.teamId);
         updates.push(`assigned_team_id = $${params.length}`);
-        // Clear assignee when reassigning team unless specified
+        // Clear assignee when reassigning team unless assigneeId explicitly specified
         if (data.assigneeId === undefined) {
           updates.push("assignee_id = NULL");
         }
@@ -593,7 +605,11 @@ export class TicketRepository {
       );
 
       let sysNote = "Ticket reassigned.";
-      if (data.teamName) {
+      if (data.teamName && data.assigneeName) {
+        sysNote = `Reassigned to ${data.assigneeName} in ${data.teamName}.`;
+      } else if (data.assigneeName) {
+        sysNote = `Assigned to ${data.assigneeName}.`;
+      } else if (data.teamName) {
         sysNote = `Reassigned to the ${data.teamName} team.`;
       }
 
@@ -616,4 +632,3 @@ export class TicketRepository {
     }
   }
 }
-

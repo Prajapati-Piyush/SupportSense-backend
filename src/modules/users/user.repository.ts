@@ -49,13 +49,23 @@ export class UserRepository {
     passwordHash: string;
     role?: UserRole;
     tenantId?: string | null;
+    teamId?: string | null;
+    title?: string | null;
   }): Promise<UserRow> {
     const role = data.role ? data.role.toLowerCase() : "customer";
     const res = await query<UserRow>(
-      `INSERT INTO users (name, email, password_hash, role, tenant_id)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (name, email, password_hash, role, tenant_id, team_id, title)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [data.name.trim(), data.email.trim().toLowerCase(), data.passwordHash, role, data.tenantId || null]
+      [
+        data.name.trim(),
+        data.email.trim().toLowerCase(),
+        data.passwordHash,
+        role,
+        data.tenantId || null,
+        data.teamId || null,
+        data.title || null,
+      ]
     );
     return res.rows[0];
   }
@@ -119,11 +129,10 @@ export class UserRepository {
       tenantSlug: user.tenant_slug || "acme",
       teamId: user.team_id || null,
       teamName: user.team_name || null,
-      title: null,
+      title: user.title || null,
       isActive: true,
       createdAt: user.created_at.toISOString(),
       updatedAt: user.updated_at.toISOString(),
     };
   }
 }
-

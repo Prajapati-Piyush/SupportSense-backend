@@ -8,6 +8,7 @@ export interface UserRow {
   role: UserRole;
   tenant_id: string | null;
   team_id: string | null;
+  title: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -35,4 +36,3 @@ export interface SessionRow {
   expires_at: Date;
   created_at: Date;
 }
-

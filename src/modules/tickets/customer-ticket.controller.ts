@@ -6,9 +6,12 @@ import { TicketCategory, TicketPriority, TicketStatus } from "./ticket.types.js"
 import { query } from "../../db/client.js";
 
 const createTicketSchema = z.object({
-  subject: z.string().trim().min(3, "Subject must be at least 3 characters"),
-  body: z.string().trim().min(5, "Message body must be at least 5 characters"),
+  subject: z.string().trim().min(3, "Subject must be at least 3 characters").optional(),
+  title: z.string().trim().min(3).optional(),
+  body: z.string().trim().min(5, "Message body must be at least 5 characters").optional(),
+  description: z.string().trim().min(5).optional(),
   categoryHint: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional().nullable(),
 });
 
@@ -49,26 +52,54 @@ export class CustomerTicketController {
     }
 
     const input = createTicketSchema.parse(req.body);
+    const subject = (input.subject || input.title || "").trim();
+    const body = (input.body || input.description || "").trim();
+    const categoryHint = input.categoryHint || input.category || null;
+
+    if (!subject || subject.length < 3) {
+      throw new BadRequestError("Subject must be at least 3 characters");
+    }
+    if (!body || body.length < 5) {
+      throw new BadRequestError("Message body must be at least 5 characters");
+    }
 
     let assignedTeamId: string | null = null;
-    if (input.categoryHint) {
-      const cat = input.categoryHint.toUpperCase();
+    if (categoryHint) {
+      const cat = categoryHint.toUpperCase();
       let search = `%${cat}%`;
       if (cat === "TECHNICAL") search = "%Tech%";
       else if (cat === "BILLING") search = "%Billing%";
+      else if (cat === "ACCOUNT") search = "%Account%";
+      else if (cat === "SALES" || cat === "OPERATIONS") search = "%Sales%";
       else if (cat === "ORDERS") search = "%Order%";
       else if (cat === "RETURNS") search = "%Return%";
-      else if (cat === "ACCOUNT") search = "%Account%";
+      else if (cat === "SECURITY") search = "%Security%";
+      else search = "%Support%";
 
       const teamRes = await query<{ id: string }>(
-        `SELECT id FROM teams
-         WHERE tenant_id = $1 AND (name ILIKE $2 OR description ILIKE $2)
-         ORDER BY (name ILIKE $2) DESC
+        `SELECT t.id FROM teams t
+         LEFT JOIN users u ON u.team_id = t.id AND u.role IN ('staff', 'admin')
+         WHERE t.tenant_id = $1 AND (t.name ILIKE $2 OR t.description ILIKE $2)
+         GROUP BY t.id, t.name
+         ORDER BY (t.name ILIKE $2) DESC, COUNT(u.id) DESC, t.name ASC
          LIMIT 1`,
         [tenantId, search]
       );
       if (teamRes.rows[0]) {
         assignedTeamId = teamRes.rows[0].id;
+      } else {
+        const fallbackTeam = await query<{ id: string }>(
+          `SELECT t.id FROM teams t
+           LEFT JOIN users u ON u.team_id = t.id AND u.role IN ('staff', 'admin')
+           WHERE t.tenant_id = $1 AND (t.name ILIKE '%Support%' OR t.name ILIKE '%General%')
+           GROUP BY t.id, t.name
+           ORDER BY COUNT(u.id) DESC, t.name ASC
+           LIMIT 1`,
+          [tenantId]
+        );
+        if (fallbackTeam.rows[0]) {
+          assignedTeamId = fallbackTeam.rows[0].id;
+        }
       }
     }
 
@@ -76,9 +107,9 @@ export class CustomerTicketController {
       tenantId,
       customerId: user.id,
       customerName: user.fullName,
-      subject: input.subject,
-      body: input.body,
-      category: (input.categoryHint as TicketCategory) || null,
+      subject,
+      body,
+      category: (categoryHint as TicketCategory) || null,
       priority: (input.priority as TicketPriority) || null,
       assignedTeamId,
     });

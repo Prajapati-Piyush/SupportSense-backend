@@ -15,7 +15,9 @@ const resolveSchema = z.object({
 
 const assignSchema = z.object({
   teamId: z.string().optional().nullable(),
+  assignedTeamId: z.string().optional().nullable(),
   assigneeId: z.string().optional().nullable(),
+  note: z.string().optional().nullable(),
 });
 
 const updateDeskTicketSchema = z.object({
@@ -218,18 +220,15 @@ export class DeskTicketController {
       throw new ForbiddenError("Ticket is not assigned to your team.");
     }
 
-    const authorTitle = `${user.tenantName || "Acme Cloud"} ${user.teamName || "Support"}`;
-
     const message = await TicketRepository.appendMessage({
       ticketId: id,
       authorType: "STAFF",
       authorId: user.id,
       authorName: user.fullName,
-      authorTitle,
+      authorTitle: user.title || (user.teamName ? `${user.tenantName} ${user.teamName}` : null),
       body: input.body,
       nextStatus: "AWAITING_CUSTOMER",
       unreadForCustomer: true,
-      assigneeId: user.id,
     });
 
     reply.status(201).send(message);
@@ -298,11 +297,33 @@ export class DeskTicketController {
       throw new NotFoundError("That ticket could not be found.");
     }
 
+    let teamId = input.teamId !== undefined ? input.teamId : input.assignedTeamId;
     let teamName: string | null = null;
-    if (input.teamId) {
+    let assigneeName: string | null = null;
+
+    if (input.assigneeId) {
+      const usr = await query<{ name: string; team_id: string | null; team_name: string | null }>(
+        `SELECT u.name, u.team_id, tm.name as team_name
+         FROM users u
+         LEFT JOIN teams tm ON u.team_id = tm.id
+         WHERE u.id = $1 AND u.tenant_id = $2
+         LIMIT 1`,
+        [input.assigneeId, tenantId]
+      );
+      if (usr.rows[0]) {
+        assigneeName = usr.rows[0].name;
+        // If teamId was not passed, adopt the assignee's team
+        if (teamId === undefined && usr.rows[0].team_id) {
+          teamId = usr.rows[0].team_id;
+          teamName = usr.rows[0].team_name;
+        }
+      }
+    }
+
+    if (teamId && !teamName) {
       const tm = await query<{ name: string }>(
-        "SELECT name FROM teams WHERE id = $1 LIMIT 1",
-        [input.teamId]
+        "SELECT name FROM teams WHERE id = $1 AND tenant_id = $2 LIMIT 1",
+        [teamId, tenantId]
       );
       if (tm.rows[0]) {
         teamName = tm.rows[0].name;
@@ -312,9 +333,10 @@ export class DeskTicketController {
     const updated = await TicketRepository.assignTicket({
       ticketId: id,
       tenantId,
-      teamId: input.teamId,
+      teamId,
       teamName,
       assigneeId: input.assigneeId,
+      assigneeName,
       actorName: user.fullName,
     });
 

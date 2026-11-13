@@ -13,6 +13,7 @@ import { documentRoutes } from "./modules/documents/document.routes.js";
 import { retrievalRoutes } from "./modules/rag/retrieval/retrieval.routes.js";
 import { generationRoutes } from "./modules/rag/generation/generation.routes.js";
 import { teamsRoutes } from "./modules/teams/teams.routes.js";
+import { userRoutes } from "./modules/users/user.routes.js";
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({
@@ -135,6 +136,8 @@ export function buildApp(): FastifyInstance {
   app.register(retrievalRoutes, { prefix: "/api/retrieval" });
   app.register(generationRoutes, { prefix: "/api/rag" });
   app.register(teamsRoutes, { prefix: "/api/teams" });
+  app.register(userRoutes, { prefix: "/api/users" });
+  app.register(userRoutes, { prefix: "/api/admin/users" });
 
   return app;
 }
